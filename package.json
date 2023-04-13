@@ -8,7 +8,8 @@
     "build": "npm run clean && tsc",
     "start": "node dist/vineScrapper.js",
     "dev": "npm run build && npm run start",
-    "lint": "eslint . --ext .ts"
+    "lint": "eslint . --ext .ts",
+    "generate-release:hard": "rm temp -rf && mkdir temp && cp * temp || mkdir releases || zip -FSrj releases/vine-es-love-hard.zip temp/* && rm temp -rf"
   },
   "keywords": [
     "vine",

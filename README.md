@@ -14,7 +14,7 @@ You can then run it by first installing the `npm packages`:
 
 And finally running the following command:
 
-`npm run start`
+`npm run dev`
 
 ## Disclaimer
 
