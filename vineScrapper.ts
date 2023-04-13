@@ -1,25 +1,24 @@
-import TelegramBot, { ChatId } from "node-telegram-bot-api";
-import puppeteer, { Browser, Page, TimeoutError } from "puppeteer-core";
+import TelegramBot, { ChatId, Message } from "node-telegram-bot-api";
+import puppeteer, { Page, TimeoutError } from "puppeteer-core";
 import {
   CTA_SELECTOR,
-  DELAY as DELAY_BETWEEN_CALLS_MS,
+  DELAY_BETWEEN_CALLS_MS,
   NUMBER_ITEMS_SELECTOR,
   PASSWORD_SELECTOR,
+  TIMEOUT_MS,
   URL,
   USERNAME_SELECTOR,
   config,
-} from "./constants.js";
+} from "./constants";
 
-//Variables usadas por la app
 let chatId: ChatId = "";
 let scrap = 0;
-let numbItems = 0;
+let itemCount = 0;
 let bot: TelegramBot | undefined = undefined;
 
 const { botToken, password, username } = config;
 
 (() => {
-  //Telegram bot constants
   if (!botToken || !password || !username) {
     console.error(
       "Asegúrate de que tienes definidos los valores del archivo `.env`, igual que el ejemplo `.env.example`"
@@ -29,31 +28,30 @@ const { botToken, password, username } = config;
 
   bot = new TelegramBot(botToken, { polling: true });
 
-  // Al enviar la palabra 'comenzar' inicia la monitorización y el envío de mensajes
-  bot?.onText(/\/comenzar/, (msg) => {
-    chatId = msg.chat.id;
-    scrap = 1;
-    console.log("Iniciando el monitoreo");
-    bot?.sendMessage(chatId, "se inicia el monitoreo");
-    (async () => {
-      await startMonitoring(URL);
-    })();
-  });
-
-  // Para el scrapper
-  bot?.onText(/\/para/, () => {
-    console.log("Deteniendo el monitoreo");
-    bot?.sendMessage(chatId, "se detiene el monitoreo");
-    scrap = 0;
-    chatId = "";
-  });
-
-  // Comprueba si el scrapper está trabajando
-  bot?.onText(/\/isworking/, () => {
-    console.log("Funcionando: Hay " + numbItems + "productos");
-    bot?.sendMessage(chatId, "Está funcionando con " + numbItems + "productos");
-  });
+  bot.onText(/\/comenzar/, initMonitoring);
+  bot.onText(/\/para/, stopMonitoring);
+  bot.onText(/\/isworking/, isWorking);
 })();
+
+async function initMonitoring(botMessage: Message) {
+  chatId = botMessage.chat.id;
+  scrap = 1;
+  console.log("Iniciando la monitorización");
+  bot.sendMessage(chatId, "se inicia la monitorización");
+  await startMonitoring();
+}
+
+function stopMonitoring() {
+  console.log("Deteniendo la monitorización");
+  bot.sendMessage(chatId, "se detiene la monitorización");
+  scrap = 0;
+  chatId = "";
+}
+
+function isWorking() {
+  console.log("Funcionando: Hay " + itemCount + "productos");
+  bot.sendMessage(chatId, "Está funcionando con " + itemCount + "productos");
+}
 
 async function delay(milliseconds: number) {
   return new Promise((resolve) => {
@@ -72,75 +70,86 @@ async function startBrowser() {
   return { browser, page };
 }
 
-async function loginToAmazon(page: Page, url: string) {
+async function loginToAmazon(page: Page) {
+  console.log("Navegando hacia login");
   page.setViewport({ width: 1366, height: 768 });
-  await page.goto(url);
+  await page.goto(URL);
   await page.waitForNavigation();
 
+  console.log("Introduciendo usuario");
   await page.click(USERNAME_SELECTOR);
   await page.keyboard.type(username);
+
+  console.log("Introduciendo contraseña");
   await page.click(PASSWORD_SELECTOR);
   await page.keyboard.type(password);
+
+  console.log("Mandando credenciales");
   await page.click(CTA_SELECTOR);
+
+  console.log("Aguardando navegación");
   await page.waitForNavigation();
 }
 
-async function startMonitoring(url: string) {
+async function startMonitoring() {
   console.log("Inicializa el navegador");
   const { browser, page } = await startBrowser();
 
   console.log("Navegador iniciado, haciendo login en Amazon");
-  await loginToAmazon(page, url);
+  await loginToAmazon(page);
 
-  let numbItemsAux = 0;
+  let itemCountAux = 0;
   while (scrap === 1) {
     try {
-      await page.waitForSelector(NUMBER_ITEMS_SELECTOR, { timeout: 5000 }); //chequea si hay elementos en la cola. Si pasa el timeout, avisa con un mensaje en consola
-      const element = await page.$(NUMBER_ITEMS_SELECTOR);
-      const value = await page.evaluate((el) => el?.textContent, element);
-      console.log("valor: " + value);
+      console.log("Aguardando al selector");
+      await page.waitForSelector(NUMBER_ITEMS_SELECTOR, {
+        timeout: TIMEOUT_MS,
+      });
 
-      //Sacamos el numero de items en la lista de la cadena de texto
-      const auxStr = value?.split("de").pop();
-      numbItemsAux = Number.parseInt(auxStr?.substring(1, 3) ?? "0");
-      console.log("Numero de Items Aux: " + numbItemsAux);
-      console.log("Numero de Items Reales: " + numbItems);
+      const itemSelector = await page.$(NUMBER_ITEMS_SELECTOR);
+      const itemSelectorContent = await page.evaluate(
+        (el) => el?.textContent,
+        itemSelector
+      );
+      console.log("Valor encontrado: " + itemSelectorContent);
+
+      const auxStr = itemSelectorContent?.split("de").pop();
+      itemCountAux = Number.parseInt(auxStr?.substring(1, 3) ?? "0");
+      console.log("Numero de Items Aux: " + itemCountAux);
+      console.log("Numero de Items Reales: " + itemCount);
     } catch (e) {
-      //Si se produce un error por timeout (se supone que es porque no hay items en la lista) ponemos los contadores de items a 0
       if (e instanceof TimeoutError) {
-        numbItems = 0;
-        numbItemsAux = 0;
+        itemCount = 0;
+        itemCountAux = 0;
         console.log("No hay items");
       } else {
-        bot?.sendMessage(chatId, "Hay un error: " + e);
+        bot?.sendMessage(chatId, "Hay un error no controlado: " + e);
       }
     }
 
-    //si hay más elementos que la última vez, se envía un mensaje para avisar de chequear la lista
-    if (numbItemsAux > numbItems) {
+    if (itemCountAux > itemCount) {
       if (chatId.toString().length !== 0) {
-        console.log("hay nuevos elementos");
-        bot?.sendMessage(
+        console.log("Hay nuevos elementos, avisando via bot");
+        const newItems = itemCountAux - itemCount;
+        bot.sendMessage(
           chatId,
-          "Consulta la lista. \nHay " +
-            (numbItemsAux - numbItems) +
-            " nuevos. Total: " +
-            numbItems +
-            "\n" +
-            URL
+          `Consulta la lista. \nHay ${newItems} nuevos. Total: ${itemCount}\n${URL}`
         );
       }
     }
-    //se actualiza el número de productos reales
-    numbItems = numbItemsAux;
+    console.log("Actualizando números de items reales");
+    itemCount = itemCountAux;
 
-    //Introduce una espera de DELAY milisegundos
+    console.log(`Esperando ${DELAY_BETWEEN_CALLS_MS}ms antes de recargar`);
     await delay(DELAY_BETWEEN_CALLS_MS);
-    //refresca la página web
+
+    console.log(`Refrescando sitio web`);
     await page.evaluate(() => {
       location.reload();
     });
-    console.log(new Date().toLocaleString() + " - Website refreshed");
+    console.log(
+      new Date().toLocaleString() + " - Sitio web refrescado, reiniciando ciclo"
+    );
   }
 
   await browser.close();
