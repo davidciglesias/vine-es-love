@@ -74,7 +74,6 @@ async function loginToAmazon(page: Page) {
   console.log("Navegando hacia login");
   page.setViewport({ width: 1366, height: 768 });
   await page.goto(URL);
-  await page.waitForNavigation();
 
   console.log("Introduciendo usuario");
   await page.click(USERNAME_SELECTOR);
@@ -86,9 +85,6 @@ async function loginToAmazon(page: Page) {
 
   console.log("Mandando credenciales");
   await page.click(CTA_SELECTOR);
-
-  console.log("Aguardando navegación");
-  await page.waitForNavigation();
 }
 
 async function startMonitoring() {
