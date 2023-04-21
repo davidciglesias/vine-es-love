@@ -140,9 +140,7 @@ async function startMonitoring() {
     await delay(DELAY_BETWEEN_CALLS_MS);
 
     console.log(`Refrescando sitio web`);
-    await page.evaluate(() => {
-      location.reload();
-    });
+    await page.reload();
     console.log(
       new Date().toLocaleString() + " - Sitio web refrescado, reiniciando ciclo"
     );
